@@ -1,0 +1,23 @@
+{
+    "name": "auth_scratch",
+    "version": "1.0.0",
+    "description": "",
+    "main": "index.js",
+    "type": "module",
+    "scripts": {
+        "test": "echo \"Error: no test specified\" && exit 1"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "dependencies": {
+        "argon2": "^0.40.3",
+        "better-sqlite3": "^11.0.0",
+        "h3": "^1.11.1"
+    },
+    "devDependencies": {
+        "@types/better-sqlite3": "^7.6.10",
+        "@types/node": "^20.14.2",
+        "typescript": "^5.4.5"
+    }
+}
