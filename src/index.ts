@@ -1,15 +1,26 @@
+import "dotenv/config";
 import { createServer } from "http";
 import { readFile } from "fs/promises";
 import {
     createApp,
+    createError,
     createRouter,
     defineEventHandler,
+    getCookie,
+    getQuery,
     readBody,
     sendRedirect,
+    setCookie,
     toNodeListener,
 } from "h3";
 import { hashPassword, verifyHash } from "./hash.js";
-import { getPasswordHash, insertUser } from "./db.js";
+import {
+    getOauthAccount,
+    getUser,
+    getUserByUsername,
+    insertOauthAccount,
+    insertUser,
+} from "./db.js";
 import { createAndSetSession, removeSession, useSession } from "./sessions.js";
 
 const app = createApp();
@@ -38,10 +49,12 @@ router.get(
     "/",
     defineEventHandler(async (event) => {
         const session = useSession(event);
+
         let message: string;
 
-        if (session && new Date().getTime() < session.expires) {
-            message = `you are logged in as ${session.username}`;
+        if (session) {
+            const user = getUser.get({ user_id: session.user_id });
+            message = `you are logged in as ${user?.username}`;
         } else {
             message = "you are not logged in";
         }
@@ -80,18 +93,23 @@ router.post(
         if (!username || !password) {
             message = "missing username or password";
         } else {
-            const passwordHash = getPasswordHash.get({
+            const user = getUserByUsername.get({
                 username,
-            })?.password_hash;
+            });
 
-            const valid =
-                passwordHash && (await verifyHash(passwordHash, password));
-
-            if (valid) {
-                createAndSetSession(event, username);
-                return sendRedirect(event, "/");
-            } else {
+            if (!user) {
                 message = "invalid username/password";
+            } else {
+                const valid =
+                    user?.password_hash &&
+                    (await verifyHash(user.password_hash, password));
+
+                if (valid) {
+                    createAndSetSession(event, user.user_id);
+                    return sendRedirect(event, "/");
+                } else {
+                    message = "invalid username/password";
+                }
             }
         }
 
@@ -130,15 +148,19 @@ router.post(
             message = "missing username or password";
         } else {
             try {
+                const userId = crypto.randomUUID();
+
                 insertUser.run({
+                    user_id: userId,
                     username,
-                    passwordHash: await hashPassword(password),
+                    password_hash: await hashPassword(password),
+                    avatar_url: undefined,
                 });
 
-                createAndSetSession(event, username);
+                createAndSetSession(event, userId);
                 return sendRedirect(event, "/");
             } catch (error: any) {
-                if (error?.code === "SQLITE_CONSTRAINT_PRIMARYKEY") {
+                if (error?.code === "SQLITE_CONSTRAINT_UNIQUE") {
                     message = "there's already someone with that username";
                 } else {
                     message = "something went wrong";
@@ -151,13 +173,111 @@ router.post(
     })
 );
 
+router.get(
+    "/github-sign-in",
+    defineEventHandler((event) => {
+        const session = useSession(event);
+
+        if (session) {
+            return sendRedirect(event, "/");
+        }
+
+        const state = crypto.randomUUID();
+
+        setCookie(event, "state", state, {
+            path: "/",
+            maxAge: 60 * 10,
+        });
+
+        return sendRedirect(
+            event,
+            `https://github.com/login/oauth/authorize?` +
+                new URLSearchParams({
+                    client_id: process.env.GITHUB_CLIENT_ID!,
+                    state,
+                })
+        );
+    })
+);
+
+router.get(
+    "/github-callback",
+    defineEventHandler(async (event) => {
+        const { code, state } = getQuery(event);
+
+        const storedState = getCookie(event, "state");
+
+        if (!code || !state || !storedState || state !== storedState) {
+            throw createError({
+                status: 404,
+                statusMessage: "Bad request",
+            });
+        }
+
+        try {
+            const accessToken = await fetch(
+                "https://github.com/login/oauth/access_token?" +
+                    new URLSearchParams({
+                        client_id: process.env.GITHUB_CLIENT_ID!,
+                        client_secret: process.env.GITHUB_CLIENT_SECRET!,
+                        code: code as string,
+                    }),
+                {
+                    headers: {
+                        Accept: "application/json",
+                    },
+                }
+            ).then((res) => res.json());
+
+            const githubUser = await fetch("https://api.github.com/user", {
+                headers: {
+                    Authorization: `Bearer ${accessToken.access_token}`,
+                },
+            }).then((res) => res.json());
+
+            const existingAccount = getOauthAccount.get({
+                provider_user_id: githubUser.id,
+            });
+
+            if (existingAccount) {
+                createAndSetSession(event, existingAccount.user_id);
+                return sendRedirect(event, "/");
+            } else {
+                const userId = crypto.randomUUID();
+
+                insertUser.run({
+                    user_id: userId,
+                    username: githubUser.login,
+                    avatar_url: githubUser.avatar_url,
+                    password_hash: undefined,
+                });
+
+                insertOauthAccount.run({
+                    provider_name: "github",
+                    provider_user_id: githubUser.id,
+                    user_id: userId,
+                });
+
+                createAndSetSession(event, userId);
+                return sendRedirect(event, "/");
+            }
+        } catch (error) {
+            console.error(error);
+            throw createError({
+                status: 500,
+                statusMessage: "Something went wrong",
+            });
+        }
+    })
+);
+
 router.post(
     "/logout",
     defineEventHandler((event) => {
         const session = useSession(event);
 
         if (session) {
-            removeSession(event, session.id);
+            removeSession(event, session.session_id);
         }
 
         return sendRedirect(event, "/");

@@ -1,6 +1,6 @@
 import argon2 from "argon2";
 
-const secret = Buffer.from("deez");
+const secret = Buffer.from(process.env.HASH_SECRET!);
 
 export function hashPassword(password: string): Promise<string> {
     return argon2.hash(password, {

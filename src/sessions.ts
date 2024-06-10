@@ -9,19 +9,19 @@ import { deleteSession, getSession, insertSession } from "./db.js";
 
 export function createAndSetSession(
     event: H3Event<EventHandlerRequest>,
-    username: string
+    userId: string
 ) {
-    const sessionId = crypto.getRandomValues(new Uint32Array(1))[0];
+    const sessionId = crypto.randomUUID();
     const expires = new Date();
     expires.setDate(expires.getDate() + 30);
 
     insertSession.run({
-        id: sessionId,
+        session_id: sessionId,
         expires: expires.getTime(),
-        username,
+        user_id: userId,
     });
 
-    setCookie(event, "session", sessionId.toString(), {
+    setCookie(event, "session", sessionId, {
         httpOnly: true,
         maxAge: 60 * 60 * 24 * 30,
         sameSite: "lax",
@@ -29,21 +29,25 @@ export function createAndSetSession(
     });
 }
 
-export function removeSession(event: H3Event<EventHandlerRequest>, id: number) {
-    deleteSession.run({ id });
+export function removeSession(
+    event: H3Event<EventHandlerRequest>,
+    sessionId: string
+) {
+    deleteSession.run({ session_id: sessionId });
     deleteCookie(event, "session");
 }
 
 export function useSession(event: H3Event<EventHandlerRequest>) {
     const sessionId = getCookie(event, "session");
-    const session = sessionId && getSession.get({ id: parseInt(sessionId) });
 
-    if (session) {
-        if (new Date().getTime() < session.expires) {
+    if (sessionId) {
+        const session = getSession.get({ session_id: sessionId });
+
+        if (session && new Date().getTime() < session.expires) {
             return session;
-        } else {
-            deleteCookie(event, "session");
         }
+
+        deleteCookie(event, "session");
     }
 
     return undefined;
