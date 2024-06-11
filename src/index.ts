@@ -15,10 +15,12 @@ import {
 } from "h3";
 import { hashPassword, verifyHash } from "./hash.js";
 import {
+    getAndDeleteOauthSignupSession,
     getOauthAccount,
     getUser,
     getUserByUsername,
     insertOauthAccount,
+    insertOauthSignupSession,
     insertUser,
 } from "./db.js";
 import { createAndSetSession, removeSession, useSession } from "./sessions.js";
@@ -245,10 +247,20 @@ router.get(
                 createAndSetSession(event, existingAccount.user_id);
                 return sendRedirect(event, "/");
             } else {
-                setCookie(event, "github_access_token", accessToken, {
-                    path: "/",
-                    maxAge: 60 * 10,
+                const signupSessionId = crypto.randomUUID();
+
+                insertOauthSignupSession.run({
+                    session_id: signupSessionId,
+                    expires: new Date(Date.now() + 60 * 60 * 1000).getTime(), // 1 hour from now
+                    provider_name: "github",
+                    access_token: accessToken,
                 });
+
+                setCookie(event, "signup_session", signupSessionId, {
+                    path: "/",
+                    maxAge: 60 * 60,
+                });
+
                 return sendRedirect(event, "/choose-username");
             }
         } catch {
@@ -267,9 +279,9 @@ router.post(
     defineEventHandler(async (event) => {
         const { username } = await readBody(event);
 
-        const githubAccessToken = getCookie(event, "github_access_token");
+        const signupSessionId = getCookie(event, "signup_session");
 
-        if (!username || !githubAccessToken) {
+        if (!username || !signupSessionId) {
             throw createError({
                 status: 404,
                 statusMessage: "Bad request",
@@ -277,9 +289,20 @@ router.post(
         }
 
         try {
+            const signupSession = getAndDeleteOauthSignupSession.get({
+                session_id: signupSessionId,
+            });
+
+            if (
+                !signupSession ||
+                new Date().getTime() > signupSession.expires
+            ) {
+                throw new Error("No signup session");
+            }
+
             const githubUser = await fetch("https://api.github.com/user", {
                 headers: {
-                    Authorization: `Bearer ${githubAccessToken}`,
+                    Authorization: `Bearer ${signupSession.access_token}`,
                 },
             }).then((res) => res.json());
 
@@ -300,18 +323,14 @@ router.post(
             createAndSetSession(event, userId);
             return sendRedirect(event, "/");
         } catch (error: any) {
-            let message: string;
-
-            if (error?.code === "SQLITE_CONSTRAINT_UNIQUE") {
-                message = "there's already someone with that username";
-            } else {
-                message = "something went wrong, please try signing in again";
-            }
-
             const page = await html("choose-username");
             return page.replace(
                 "<!-- error message -->",
-                `<h1>${message}</h1>`
+                `<h1>${
+                    error?.code === "SQLITE_CONSTRAINT_UNIQUE"
+                        ? "there's already someone with that username"
+                        : "something went wrong, please try signing in again"
+                }</h1>`
             );
         }
     })

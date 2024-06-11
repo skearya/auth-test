@@ -43,8 +43,12 @@ export function useSession(event: H3Event<EventHandlerRequest>) {
     if (sessionId) {
         const session = getSession.get({ session_id: sessionId });
 
-        if (session && new Date().getTime() < session.expires) {
-            return session;
+        if (session) {
+            if (new Date().getTime() < session.expires) {
+                return session;
+            }
+
+            deleteSession.run({ session_id: sessionId });
         }
 
         deleteCookie(event, "session");

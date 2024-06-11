@@ -22,6 +22,15 @@ db.exec(
 );
 
 db.exec(
+    `CREATE TABLE IF NOT EXISTS oauth_signup_sessions(
+        session_id TEXT PRIMARY KEY,
+        expires INTEGER NOT NULL,
+        provider_name TEXT NOT NULL,
+        access_token TEXT NOT NULL
+    )`
+);
+
+db.exec(
     `CREATE TABLE IF NOT EXISTS sessions(
         session_id TEXT PRIMARY KEY,
         expires INTEGER NOT NULL,
@@ -41,6 +50,13 @@ type OauthAccount = {
     provider_name: string;
     provider_user_id: string;
     user_id: string;
+};
+
+type OauthSignupSession = {
+    session_id: string;
+    expires: number;
+    provider_name: string;
+    access_token: string;
 };
 
 type Session = {
@@ -63,7 +79,7 @@ export const insertUser = db.prepare<User>(
     `INSERT INTO users (user_id, username, password_hash, avatar_url) VALUES (:user_id, :username, :password_hash, :avatar_url)`
 );
 
-// oauth accounts
+// oauth
 
 export const getOauthAccount = db.prepare<
     Pick<OauthAccount, "provider_user_id">,
@@ -74,6 +90,17 @@ export const getOauthAccount = db.prepare<
 
 export const insertOauthAccount = db.prepare<OauthAccount>(
     `INSERT INTO oauth_accounts (provider_name, provider_user_id, user_id) VALUES (:provider_name, :provider_user_id, :user_id)`
+);
+
+export const insertOauthSignupSession = db.prepare<OauthSignupSession>(
+    `INSERT INTO oauth_signup_sessions (session_id, expires, provider_name, access_token) VALUES (:session_id, :expires, :provider_name, :access_token)`
+);
+
+export const getAndDeleteOauthSignupSession = db.prepare<
+    Pick<OauthSignupSession, "session_id">,
+    OauthSignupSession
+>(
+    `DELETE from oauth_signup_sessions WHERE session_id = :session_id RETURNING *`
 );
 
 // sessions
