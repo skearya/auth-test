@@ -59,7 +59,7 @@ type OauthSignupSession = {
     access_token: string;
 };
 
-type Session = {
+export type Session = {
     session_id: string;
     expires: number;
     user_id: string;

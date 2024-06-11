@@ -3,18 +3,18 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <link href="./output.css" rel="stylesheet" />
         <title><!-- title --></title>
     </head>
 
     <body>
-        <nav>
-            <a href="/">home</a>
-            <a href="/sign-in">sign in</a>
-            <a href="/github-sign-in">sign in with github</a>
-            <a href="/sign-up">sign up</a>
-            <form action="/logout" method="post">
-                <button>logout</button>
-            </form>
+        <nav class="border-b p-4">
+            <div class="max-w-screen-md mx-auto flex justify-between">
+                <a href="/">home</a>
+                <div class="flex gap-x-4">
+                    <!-- sign in/up -->
+                </div>
+            </div>
         </nav>
         <!-- slot -->
     </body>

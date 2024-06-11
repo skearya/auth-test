@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { createServer } from "http";
-import { readFile } from "fs/promises";
+import { readFile, stat } from "fs/promises";
 import {
     createApp,
     createError,
@@ -10,11 +10,13 @@ import {
     getQuery,
     readBody,
     sendRedirect,
+    serveStatic,
     setCookie,
     toNodeListener,
 } from "h3";
 import { hashPassword, verifyHash } from "./hash.js";
 import {
+    Session,
     getAndDeleteOauthSignupSession,
     getOauthAccount,
     getUser,
@@ -24,12 +26,9 @@ import {
     insertUser,
 } from "./db.js";
 import { createAndSetSession, removeSession, useSession } from "./sessions.js";
+import { join } from "path";
 
-const app = createApp();
-const router = createRouter();
-app.use(router);
-
-const html = async (name: string) => {
+const html = async (session: Session | undefined, name: string) => {
     const layout = await readFile(`./src/templates/layout.html`, {
         encoding: "utf8",
     });
@@ -40,6 +39,12 @@ const html = async (name: string) => {
             name === "index" ? "auth test" : name.replaceAll("-", " ")
         )
         .replace(
+            `<!-- sign in/up -->`,
+            session
+                ? `<form action="/logout" method="post" class="inline"><button>logout</button></form>`
+                : `<a href="/sign-in">sign in</a><a href="/sign-up">sign up</a>`
+        )
+        .replace(
             `<!-- slot -->`,
             await readFile(`./src/templates/${name}.html`, {
                 encoding: "utf8",
@@ -47,20 +52,51 @@ const html = async (name: string) => {
         );
 };
 
+const app = createApp();
+const router = createRouter();
+
+app.use(
+    defineEventHandler((event) => {
+        event.context.session = useSession(event);
+    })
+);
+
+app.use(router);
+
+app.use(
+    defineEventHandler((event) => {
+        return serveStatic(event, {
+            getContents: (id) => readFile(join("public", id)),
+            getMeta: async (id) => {
+                const stats = await stat(join("public", id)).catch(() => {});
+
+                if (!stats || !stats.isFile()) {
+                    return;
+                }
+
+                return {
+                    size: stats.size,
+                    mtime: stats.mtimeMs,
+                };
+            },
+        });
+    })
+);
+
 router.get(
     "/",
     defineEventHandler(async (event) => {
-        const session = useSession(event);
+        const session: Session | undefined = event.context.session;
 
         const username =
             session && getUser.get({ user_id: session.user_id })?.username;
 
-        const page = await html("index");
+        const page = await html(session, "index");
         return page.replace(
             "<!-- message -->",
             `<h2>${
                 username
-                    ? `you are logged in as ${username}`
+                    ? `you are logged in as <pre class="inline">${username}</pre>`
                     : "you are not logged in"
             }</h2>`
         );
@@ -70,20 +106,20 @@ router.get(
 router.get(
     "/sign-in",
     defineEventHandler((event) => {
-        const session = useSession(event);
+        const session: Session | undefined = event.context.session;
 
         if (session) {
             return sendRedirect(event, "/");
         }
 
-        return html("sign-in");
+        return html(session, "sign-in");
     })
 );
 
 router.post(
     "/sign-in",
     defineEventHandler(async (event) => {
-        const session = useSession(event);
+        const session: Session | undefined = event.context.session;
 
         if (session) {
             return sendRedirect(event, "/");
@@ -113,7 +149,7 @@ router.post(
             }
         }
 
-        const page = await html("sign-in");
+        const page = await html(session, "sign-in");
         return page.replace(
             "<!-- error message -->",
             `<h1>invalid username/password</h1>`
@@ -124,20 +160,20 @@ router.post(
 router.get(
     "/sign-up",
     defineEventHandler((event) => {
-        const session = useSession(event);
+        const session: Session | undefined = event.context.session;
 
         if (session) {
             return sendRedirect(event, "/");
         }
 
-        return html("sign-up");
+        return html(session, "sign-up");
     })
 );
 
 router.post(
     "/sign-up",
     defineEventHandler(async (event) => {
-        const session = useSession(event);
+        const session: Session | undefined = event.context.session;
 
         if (session) {
             return sendRedirect(event, "/");
@@ -165,7 +201,7 @@ router.post(
             createAndSetSession(event, userId);
             return sendRedirect(event, "/");
         } catch (error: any) {
-            const page = await html("sign-up");
+            const page = await html(session, "sign-up");
             return page.replace(
                 "<!-- error message -->",
                 `<h1>${
@@ -181,7 +217,7 @@ router.post(
 router.get(
     "/github-sign-in",
     defineEventHandler((event) => {
-        const session = useSession(event);
+        const session: Session | undefined = event.context.session;
 
         if (session) {
             return sendRedirect(event, "/");
@@ -213,7 +249,7 @@ router.get(
         const storedState = getCookie(event, "state");
 
         if (!code || !state || !storedState || state !== storedState) {
-            return html("oauth-error");
+            return html(event.context.session, "oauth-error");
         }
 
         try {
@@ -264,14 +300,16 @@ router.get(
                 return sendRedirect(event, "/choose-username");
             }
         } catch {
-            return html("oauth-error");
+            return html(event.context.session, "oauth-error");
         }
     })
 );
 
 router.get(
     "/choose-username",
-    defineEventHandler(() => html("choose-username"))
+    defineEventHandler((event) =>
+        html(event.context.session, "choose-username")
+    )
 );
 
 router.post(
@@ -323,7 +361,7 @@ router.post(
             createAndSetSession(event, userId);
             return sendRedirect(event, "/");
         } catch (error: any) {
-            const page = await html("choose-username");
+            const page = await html(event.context.session, "choose-username");
             return page.replace(
                 "<!-- error message -->",
                 `<h1>${
@@ -339,7 +377,7 @@ router.post(
 router.post(
     "/logout",
     defineEventHandler((event) => {
-        const session = useSession(event);
+        const session: Session | undefined = event.context.session;
 
         if (session) {
             removeSession(event, session.session_id);

@@ -1,9 +1,33 @@
-<main>
-    <h1>sign up</h1>
-    <form method="post">
-        <input type="text" placeholder="username" name="username" required />
-        <input type="password" placeholder="password" name="password" required />
-        <button>submit</button>
-    </form>
-    <!-- error message -->
+<main class="flex items-center justify-center">
+    <div class="space-y-4 mt-32">
+        <h1 class="text-lg">sign up</h1>
+        <form method="post" class="flex items-center gap-x-6">
+            <div class="space-y-2">
+                <input
+                    type="text"
+                    placeholder="username"
+                    name="username"
+                    required
+                    class="rounded-md border bg-zinc-950 placeholder:text-border-neutral-800 block px-3 py-2"
+                />
+                <input
+                    type="password"
+                    placeholder="password"
+                    name="password"
+                    required
+                    class="rounded-md border bg-zinc-950 placeholder:text-border-neutral-800 block px-3 py-2"
+                />
+            </div>
+            <button>submit</button>
+        </form>
+        <div class="text-red-400">
+            <!-- error message -->
+        </div>
+        <h1>or</h1>
+        <a href="/github-sign-in" class="block">
+            <button class="bg-white text-zinc-950 w-full rounded-md py-2">
+                sign up with github
+            </button>
+        </a>
+    </div>
 </main>
