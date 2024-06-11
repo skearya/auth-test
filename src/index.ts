@@ -50,17 +50,18 @@ router.get(
     defineEventHandler(async (event) => {
         const session = useSession(event);
 
-        let message: string;
-
-        if (session) {
-            const user = getUser.get({ user_id: session.user_id });
-            message = `you are logged in as ${user?.username}`;
-        } else {
-            message = "you are not logged in";
-        }
+        const username =
+            session && getUser.get({ user_id: session.user_id })?.username;
 
         const page = await html("index");
-        return page.replace("<!-- message -->", `<h2>${message}</h2>`);
+        return page.replace(
+            "<!-- message -->",
+            `<h2>${
+                username
+                    ? `you are logged in as ${username}`
+                    : "you are not logged in"
+            }</h2>`
+        );
     })
 );
 
@@ -88,33 +89,33 @@ router.post(
 
         const { username, password } = await readBody(event);
 
-        let message: string;
-
         if (!username || !password) {
-            message = "missing username or password";
-        } else {
-            const user = getUserByUsername.get({
-                username,
+            throw createError({
+                status: 404,
+                statusMessage: "Bad request",
             });
+        }
 
-            if (!user) {
-                message = "invalid username/password";
-            } else {
-                const valid =
-                    user?.password_hash &&
-                    (await verifyHash(user.password_hash, password));
+        const user = getUserByUsername.get({
+            username,
+        });
 
-                if (valid) {
-                    createAndSetSession(event, user.user_id);
-                    return sendRedirect(event, "/");
-                } else {
-                    message = "invalid username/password";
-                }
+        if (user) {
+            const valid =
+                user.password_hash &&
+                (await verifyHash(user.password_hash, password));
+
+            if (valid) {
+                createAndSetSession(event, user.user_id);
+                return sendRedirect(event, "/");
             }
         }
 
         const page = await html("sign-in");
-        return page.replace("<!-- error message -->", `<h1>${message}</h1>`);
+        return page.replace(
+            "<!-- error message -->",
+            `<h1>invalid username/password</h1>`
+        );
     })
 );
 
@@ -142,34 +143,36 @@ router.post(
 
         const { username, password } = await readBody(event);
 
-        let message: string;
-
         if (!username || !password) {
-            message = "missing username or password";
-        } else {
-            try {
-                const userId = crypto.randomUUID();
-
-                insertUser.run({
-                    user_id: userId,
-                    username,
-                    password_hash: await hashPassword(password),
-                    avatar_url: undefined,
-                });
-
-                createAndSetSession(event, userId);
-                return sendRedirect(event, "/");
-            } catch (error: any) {
-                if (error?.code === "SQLITE_CONSTRAINT_UNIQUE") {
-                    message = "there's already someone with that username";
-                } else {
-                    message = "something went wrong";
-                }
-            }
+            throw createError({
+                status: 404,
+                statusMessage: "Bad request",
+            });
         }
 
-        const page = await html("sign-up");
-        return page.replace("<!-- error message -->", `<h1>${message}</h1>`);
+        try {
+            const userId = crypto.randomUUID();
+
+            insertUser.run({
+                user_id: userId,
+                username,
+                password_hash: await hashPassword(password),
+                avatar_url: undefined,
+            });
+
+            createAndSetSession(event, userId);
+            return sendRedirect(event, "/");
+        } catch (error: any) {
+            const page = await html("sign-up");
+            return page.replace(
+                "<!-- error message -->",
+                `<h1>${
+                    error?.code === "SQLITE_CONSTRAINT_UNIQUE"
+                        ? "there's already someone with that username"
+                        : "something went wrong"
+                }</h1>`
+            );
+        }
     })
 );
 
@@ -208,10 +211,7 @@ router.get(
         const storedState = getCookie(event, "state");
 
         if (!code || !state || !storedState || state !== storedState) {
-            throw createError({
-                status: 404,
-                statusMessage: "Bad request",
-            });
+            return html("oauth-error");
         }
 
         try {
@@ -227,11 +227,13 @@ router.get(
                         Accept: "application/json",
                     },
                 }
-            ).then((res) => res.json());
+            )
+                .then((res) => res.json())
+                .then((json) => json.access_token);
 
             const githubUser = await fetch("https://api.github.com/user", {
                 headers: {
-                    Authorization: `Bearer ${accessToken.access_token}`,
+                    Authorization: `Bearer ${accessToken}`,
                 },
             }).then((res) => res.json());
 
@@ -243,30 +245,74 @@ router.get(
                 createAndSetSession(event, existingAccount.user_id);
                 return sendRedirect(event, "/");
             } else {
-                const userId = crypto.randomUUID();
-
-                insertUser.run({
-                    user_id: userId,
-                    username: githubUser.login,
-                    avatar_url: githubUser.avatar_url,
-                    password_hash: undefined,
+                setCookie(event, "github_access_token", accessToken, {
+                    path: "/",
+                    maxAge: 60 * 10,
                 });
-
-                insertOauthAccount.run({
-                    provider_name: "github",
-                    provider_user_id: githubUser.id,
-                    user_id: userId,
-                });
-
-                createAndSetSession(event, userId);
-                return sendRedirect(event, "/");
+                return sendRedirect(event, "/choose-username");
             }
-        } catch (error) {
-            console.error(error);
+        } catch {
+            return html("oauth-error");
+        }
+    })
+);
+
+router.get(
+    "/choose-username",
+    defineEventHandler(() => html("choose-username"))
+);
+
+router.post(
+    "/choose-username",
+    defineEventHandler(async (event) => {
+        const { username } = await readBody(event);
+
+        const githubAccessToken = getCookie(event, "github_access_token");
+
+        if (!username || !githubAccessToken) {
             throw createError({
-                status: 500,
-                statusMessage: "Something went wrong",
+                status: 404,
+                statusMessage: "Bad request",
             });
+        }
+
+        try {
+            const githubUser = await fetch("https://api.github.com/user", {
+                headers: {
+                    Authorization: `Bearer ${githubAccessToken}`,
+                },
+            }).then((res) => res.json());
+
+            const userId = crypto.randomUUID();
+
+            insertUser.run({
+                user_id: userId,
+                username,
+                avatar_url: githubUser.avatar_url,
+                password_hash: undefined,
+            });
+            insertOauthAccount.run({
+                provider_name: "github",
+                provider_user_id: githubUser.id,
+                user_id: userId,
+            });
+
+            createAndSetSession(event, userId);
+            return sendRedirect(event, "/");
+        } catch (error: any) {
+            let message: string;
+
+            if (error?.code === "SQLITE_CONSTRAINT_UNIQUE") {
+                message = "there's already someone with that username";
+            } else {
+                message = "something went wrong, please try signing in again";
+            }
+
+            const page = await html("choose-username");
+            return page.replace(
+                "<!-- error message -->",
+                `<h1>${message}</h1>`
+            );
         }
     })
 );
