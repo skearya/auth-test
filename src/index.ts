@@ -96,7 +96,7 @@ router.get(
             "<!-- message -->",
             `<h2>${
                 username
-                    ? `you are logged in as <pre class="inline">${username}</pre>`
+                    ? `you are logged in as "${username}"`
                     : "you are not logged in"
             }</h2>`
         );
