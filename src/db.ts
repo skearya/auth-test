@@ -85,23 +85,28 @@ export const getOauthAccount = db.prepare<
     Pick<OauthAccount, "provider_user_id">,
     OauthAccount
 >(`
-    SELECT * from oauth_accounts WHERE provider_user_id IS :provider_user_id
+    SELECT * FROM oauth_accounts WHERE provider_user_id IS :provider_user_id
 `);
 
 export const insertOauthAccount = db.prepare<OauthAccount>(
     `INSERT INTO oauth_accounts (provider_name, provider_user_id, user_id) VALUES (:provider_name, :provider_user_id, :user_id)`
 );
 
+export const getOauthSignupSession = db.prepare<
+    Pick<OauthSignupSession, "session_id">,
+    OauthSignupSession
+>(`
+    SELECT * FROM oauth_signup_sessions WHERE session_id = :session_id
+`);
+
 export const insertOauthSignupSession = db.prepare<OauthSignupSession>(
     `INSERT INTO oauth_signup_sessions (session_id, expires, provider_name, access_token) VALUES (:session_id, :expires, :provider_name, :access_token)`
 );
 
-export const getAndDeleteOauthSignupSession = db.prepare<
+export const deleteOauthSignupSession = db.prepare<
     Pick<OauthSignupSession, "session_id">,
     OauthSignupSession
->(
-    `DELETE from oauth_signup_sessions WHERE session_id = :session_id RETURNING *`
-);
+>(`DELETE FROM oauth_signup_sessions WHERE session_id = :session_id`);
 
 // sessions
 
@@ -114,5 +119,5 @@ export const insertSession = db.prepare<Session>(
 );
 
 export const deleteSession = db.prepare<Pick<Session, "session_id">>(
-    `DELETE from sessions WHERE session_id = :session_id`
+    `DELETE FROM sessions WHERE session_id = :session_id`
 );

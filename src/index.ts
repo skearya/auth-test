@@ -17,8 +17,9 @@ import {
 import { hashPassword, verifyHash } from "./hash.js";
 import {
     Session,
-    getAndDeleteOauthSignupSession,
+    deleteOauthSignupSession,
     getOauthAccount,
+    getOauthSignupSession,
     getUser,
     getUserByUsername,
     insertOauthAccount,
@@ -327,7 +328,7 @@ router.post(
         }
 
         try {
-            const signupSession = getAndDeleteOauthSignupSession.get({
+            const signupSession = getOauthSignupSession.get({
                 session_id: signupSessionId,
             });
 
@@ -356,6 +357,9 @@ router.post(
                 provider_name: "github",
                 provider_user_id: githubUser.id,
                 user_id: userId,
+            });
+            deleteOauthSignupSession.run({
+                session_id: signupSessionId,
             });
 
             createAndSetSession(event, userId);
